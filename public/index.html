@@ -72,8 +72,27 @@
           </div>
         </div>
 
+        <!-- Waiting Phase -->
+        <div id="waiting-phase" class="text-center hidden">
+          <h2 class="text-3xl font-bold mb-4">참가자를 기다리는 중...</h2>
+          <div
+            class="max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg"
+          >
+            <h3 class="text-xl mb-4">참가자 목록</h3>
+            <div id="waiting-user-list" class="space-y-2 text-lg">
+              <!-- Waiting users will be dynamically inserted here -->
+            </div>
+          </div>
+          <button
+            id="start-game-btn"
+            class="hidden mt-6 text-white bg-green-600 hover:bg-green-700 font-medium rounded-lg text-xl px-8 py-3 text-center"
+          >
+            게임 시작!
+          </button>
+        </div>
+
         <!-- Main Content -->
-        <div class="grid grid-cols-3 gap-4">
+        <div id="main-content" class="hidden grid grid-cols-3 gap-4">
           <!-- Question & Answers -->
           <div class="col-span-2 bg-gray-800 p-6 rounded-lg">
             <div id="question-phase" class="">

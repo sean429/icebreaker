@@ -69,6 +69,19 @@ io.on("connection", (socket) => {
     broadcastRoomState(roomId);
   });
 
+  // 게임 시작 (호스트만 가능)
+  socket.on("start_game", ({ roomId }) => {
+    const room = getRoom(roomId);
+    if (!room) return;
+    if (socket.id !== room.host) {
+      return socket.emit("error_msg", "방장만 게임을 시작할 수 있습니다.");
+    }
+
+    room.phase = "answer";
+    startRoundTimer(roomId);
+    broadcastRoomState(roomId);
+  });
+
   // 답변 제출
   socket.on("submit_answer", ({ roomId, text, nickname }) => {
     const room = getRoom(roomId);
@@ -159,7 +172,15 @@ function broadcastRoomState(roomId) {
   const questionIndex = room.roundIndex % questions.length;
   const currentQuestion = questions[questionIndex];
 
-  io.to(roomId).emit("room_state", { ...room, question: currentQuestion });
+  // 클라이언트에게 보낼 데이터에서 서버 내부용 timerId를 제거
+  const { timerId, ...roomStateForClient } = room;
+
+  const payload = {
+    ...roomStateForClient,
+    question: currentQuestion,
+  };
+
+  io.to(roomId).emit("room_state", payload);
 }
 
 // 유저 제거
@@ -176,18 +197,34 @@ function startRoundTimer(roomId) {
   const room = getRoom(roomId);
   if (!room) return;
 
-  const timerId = setInterval(() => {
-    if (!rooms[roomId]) return clearInterval(timerId);
+  // 기존에 실행중인 타이머가 있다면 반드시 종료
+  if (room.timerId) {
+    clearInterval(room.timerId);
+  }
 
-    if (room.timer <= 0) {
-      room.phase = "reveal";
-      broadcastRoomState(roomId);
-      return clearInterval(timerId);
+  const newTimerId = setInterval(() => {
+    const currentRoom = getRoom(roomId);
+    // 방이 사라졌거나, 타이머가 0이 되면 타이머 종료
+    if (!currentRoom || currentRoom.timer <= 0) {
+      clearInterval(newTimerId);
+      if (currentRoom) {
+        currentRoom.timerId = null;
+        currentRoom.phase = "reveal";
+        // 타이머가 0이 되었을 때만 상태 전송
+        if (currentRoom.timer <= 0) {
+          broadcastRoomState(roomId);
+        }
+      }
+      return;
     }
 
-    room.timer -= 1;
+    // 1초씩 감소
+    currentRoom.timer -= 1;
     broadcastRoomState(roomId);
   }, 1000);
+
+  // 새로 생성된 타이머의 ID를 방 상태에 저장
+  room.timerId = newTimerId;
 }
 
 httpServer.listen(4000, () => {

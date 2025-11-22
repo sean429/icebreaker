@@ -1,5 +1,4 @@
-const SERVER_URL = "http://localhost:4000";
-const socket = io(SERVER_URL);
+const socket = io();
 
 // DOM Elements
 const lobby = document.getElementById("lobby");
@@ -11,14 +10,28 @@ const roomCodeSpan = document.getElementById("room-code");
 const userListDiv = document.getElementById("user-list");
 const timerDiv = document.getElementById("timer");
 const roundDiv = document.getElementById("round");
+
+// Game Phases
+const waitingPhase = document.getElementById("waiting-phase");
+const mainContent = document.getElementById("main-content");
+const questionPhase = document.getElementById("question-phase");
+const revealPhase = document.getElementById("reveal-phase");
+
+// Waiting Phase Elements
+const waitingUserList = document.getElementById("waiting-user-list");
+const startGameBtn = document.getElementById("start-game-btn");
+
+// Question Phase Elements
 const questionImage = document.getElementById("question-image");
 const questionText = document.getElementById("question-text");
 const answerInput = document.getElementById("answer-input");
 const submitAnswerBtn = document.getElementById("submit-answer-btn");
-const questionPhase = document.getElementById("question-phase");
-const revealPhase = document.getElementById("reveal-phase");
+
+// Reveal Phase Elements
 const answersContainer = document.getElementById("answers-container");
 const nextRoundBtn = document.getElementById("next-round-btn");
+
+// Chat Elements
 const chatMessages = document.getElementById("chat-messages");
 const chatInput = document.getElementById("chat-input");
 
@@ -26,6 +39,7 @@ const chatInput = document.getElementById("chat-input");
 let state = {
   nickname: "",
   roomId: "",
+  currentRound: -1,
 };
 
 // --- Event Listeners ---
@@ -45,9 +59,7 @@ joinBtn.addEventListener("click", async () => {
   if (!roomId) {
     // 방 생성
     try {
-      const response = await fetch(`${SERVER_URL}/rooms`, {
-        method: "POST",
-      });
+      const response = await fetch(`/rooms`, { method: "POST" });
       const data = await response.json();
       roomId = data.roomId;
     } catch (error) {
@@ -59,6 +71,11 @@ joinBtn.addEventListener("click", async () => {
 
   state.roomId = roomId;
   socket.emit("join_room", { roomId, nickname });
+});
+
+// 게임 시작
+startGameBtn.addEventListener("click", () => {
+  socket.emit("start_game", { roomId: state.roomId });
 });
 
 // 답변 제출
@@ -123,44 +140,73 @@ function updateUI(roomState) {
     room.style.display = "block";
   }
 
+  // --- 상단 헤더 정보 업데이트 ---
   roomCodeSpan.textContent = roomState.roomId;
   roundDiv.textContent = roomState.roundIndex + 1;
   timerDiv.textContent = roomState.timer;
-
-  // 유저 목록
   userListDiv.textContent = `참여중: ${roomState.users
     .map((u) => u.nickname)
     .join(", ")}`;
 
-  // 질문
-  if (roomState.question) {
-    questionImage.src = roomState.question.imageUrl;
-    questionText.textContent = roomState.question.text;
+  // --- 새로운 라운드 시작 시 처리 ---
+  // 라운드가 바뀌었다면, 현재 라운드를 업데이트하고 답변 입력창을 비운다.
+  if (roomState.roundIndex !== state.currentRound) {
+    state.currentRound = roomState.roundIndex;
+    answerInput.value = "";
   }
 
-  // 단계별 UI (답변 vs 공개)
-  if (roomState.phase === "answer") {
-    questionPhase.style.display = "block";
-    revealPhase.style.display = "none";
-    submitAnswerBtn.disabled = false;
-    submitAnswerBtn.textContent = "답변 제출";
+  // --- 게임 단계별 UI 처리 ---
+  if (roomState.phase === "waiting") {
+    waitingPhase.style.display = "block";
+    mainContent.style.display = "none";
 
-    // 내가 이미 답변했는지 확인
-    const myAnswer = roomState.answers[roomState.roundIndex]?.find(
-      (a) => a.nickname === state.nickname
-    );
-    if (myAnswer) {
-      answerInput.value = myAnswer.text;
-      submitAnswerBtn.disabled = true;
-      submitAnswerBtn.textContent = "답변 제출 완료";
-    } else {
-      answerInput.value = "";
+    // 대기자 목록 업데이트
+    waitingUserList.innerHTML = roomState.users
+      .map(
+        (user) =>
+          `<p class="p-2 bg-gray-700 rounded">${user.nickname} ${
+            user.socketId === roomState.host ? "(방장)" : ""
+          }</p>`
+      )
+      .join("");
+
+    // 방장에게만 시작 버튼 표시
+    if (socket.id === roomState.host) {
+      startGameBtn.style.display = "block";
     }
   } else {
-    // reveal phase
-    questionPhase.style.display = "none";
-    revealPhase.style.display = "block";
-    renderAnswers(roomState.answers[roomState.roundIndex] || []);
+    // "answer" 또는 "reveal" 단계
+    waitingPhase.style.display = "none";
+    mainContent.style.display = "grid";
+
+    if (roomState.question) {
+      questionImage.src = roomState.question.imageUrl;
+      questionText.textContent = roomState.question.text;
+    }
+
+    if (roomState.phase === "answer") {
+      questionPhase.style.display = "block";
+      revealPhase.style.display = "none";
+      submitAnswerBtn.disabled = false;
+      submitAnswerBtn.textContent = "답변 제출";
+
+      // 내가 현재 라운드에 제출한 답변이 있는지 확인
+      const myAnswer = roomState.answers[roomState.roundIndex]?.find(
+        (a) => a.nickname === state.nickname
+      );
+      if (myAnswer) {
+        // 제출한 답변이 있다면, 입력창에 표시하고 버튼을 비활성화
+        answerInput.value = myAnswer.text;
+        submitAnswerBtn.disabled = true;
+        submitAnswerBtn.textContent = "답변 제출 완료";
+      }
+      // (중요) 제출한 답변이 없을 경우, 입력창을 건드리지 않아 사용자의 입력을 보존
+    } else {
+      // "reveal" 단계
+      questionPhase.style.display = "none";
+      revealPhase.style.display = "block";
+      renderAnswers(roomState.answers[roomState.roundIndex] || []);
+    }
   }
 }
 
@@ -188,7 +234,6 @@ function renderAnswers(answers) {
     answersContainer.appendChild(answerEl);
   });
 
-  // 리액션 버튼에 이벤트 리스너 추가
   document.querySelectorAll(".reaction-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       const answerId = btn.dataset.answerId;
@@ -198,13 +243,15 @@ function renderAnswers(answers) {
   });
 }
 
-function addChatMessage({ nickname, text, createdAt }) {
+function addChatMessage({ nickname, text }) {
   const msgEl = document.createElement("div");
   const isMyMessage = nickname === state.nickname;
-  
+
   msgEl.innerHTML = `
-    <p class="${isMyMessage ? 'text-right' : 'text-left'}">
-      <span class="font-bold text-sm ${isMyMessage ? 'text-green-400' : 'text-yellow-400'}">${nickname}</span>:
+    <p class="${isMyMessage ? "text-right" : "text-left"}">
+      <span class="font-bold text-sm ${
+        isMyMessage ? "text-green-400" : "text-yellow-400"
+      }">${nickname}</span>:
       <span class="text-base">${text}</span>
     </p>
   `;
